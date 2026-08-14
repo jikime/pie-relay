@@ -2,6 +2,7 @@
   "name": "@pielab/pie-relay-mobile-stack",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.21.0",
   "type": "module",
   "dependencies": {
     "tweetnacl": "1.0.3",

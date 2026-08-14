@@ -41,15 +41,19 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: stable
+          cache-dependency-path: client/go.sum
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: |
             desktop/package-lock.json
             client/node-executor/package-lock.json
+
+      - name: Enable pinned pnpm
+        run: corepack enable
 
       # 러너 네이티브 타깃(windows=x86_64-pc-windows-msvc, macOS=aarch64-apple-darwin).
       - name: Setup Rust
