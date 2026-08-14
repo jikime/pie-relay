@@ -136,7 +136,6 @@ describe('Pie Relay mobile end-to-end', () => {
       advertiseHost: '127.0.0.1',
       listenHost: '127.0.0.1',
       port: 0,
-      shell: '/bin/zsh',
       connectionMode: 'relay-only',
       relayUrl,
       relayToken: token,

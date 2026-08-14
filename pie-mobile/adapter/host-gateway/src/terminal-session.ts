@@ -20,7 +20,30 @@ function defaultShell(): string {
   if (process.platform === 'win32') {
     return process.env.COMSPEC || 'powershell.exe'
   }
-  return process.env.SHELL || '/bin/zsh'
+  const configured = process.env.SHELL?.trim()
+  if (configured && existsSync(configured)) {
+    return configured
+  }
+  for (const candidate of ['/bin/bash', '/bin/zsh', '/bin/sh']) {
+    if (existsSync(candidate)) {
+      return candidate
+    }
+  }
+  return '/bin/sh'
+}
+
+function isClosedTerminalError(error: unknown): boolean {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : ''
+  const message = error instanceof Error ? error.message : String(error)
+  return (
+    code === 'EBADF' ||
+    code === 'EIO' ||
+    code === 'ENOTTY' ||
+    /(?:EBADF|EIO|ENOTTY|process.*(?:closed|exited)|pty.*closed)/i.test(message)
+  )
 }
 
 function ensureSpawnHelperExecutable(): void {
@@ -48,6 +71,7 @@ export class TerminalSession {
   private scrollback = ''
   private cols = DEFAULT_COLS
   private rows = DEFAULT_ROWS
+  private alive = true
 
   constructor(options: TerminalSessionOptions) {
     ensureSpawnHelperExecutable()
@@ -69,6 +93,9 @@ export class TerminalSession {
         listener(chunk)
       }
     })
+    this.terminal.onExit(() => {
+      this.alive = false
+    })
   }
 
   get snapshot(): string {
@@ -89,7 +116,20 @@ export class TerminalSession {
     if (nextCols === this.cols && nextRows === this.rows) {
       return
     }
-    this.terminal.resize(nextCols, nextRows)
+    if (!this.alive) {
+      return
+    }
+    try {
+      this.terminal.resize(nextCols, nextRows)
+    } catch (error) {
+      // A shell may exit between the alive check and ioctl. Resizing is
+      // best-effort, so an already-closed PTY must not crash the gateway.
+      if (isClosedTerminalError(error)) {
+        this.alive = false
+        return
+      }
+      throw error
+    }
     this.cols = nextCols
     this.rows = nextRows
   }
@@ -105,7 +145,17 @@ export class TerminalSession {
 
   close(): void {
     this.listeners.clear()
-    this.terminal.kill()
+    if (!this.alive) {
+      return
+    }
+    this.alive = false
+    try {
+      this.terminal.kill()
+    } catch (error) {
+      if (!isClosedTerminalError(error)) {
+        throw error
+      }
+    }
   }
 
   private appendScrollback(chunk: string): void {

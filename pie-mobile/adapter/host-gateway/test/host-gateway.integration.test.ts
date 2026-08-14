@@ -77,8 +77,7 @@ describe('HostGateway', () => {
       cwd: resolve('../../..'),
       advertiseHost: '127.0.0.1',
       listenHost: '127.0.0.1',
-      port: 0,
-      shell: '/bin/zsh'
+      port: 0
     })
     gateways.push(gateway)
     const ready = await gateway.start()
@@ -212,8 +211,7 @@ describe('HostGateway', () => {
       cwd: resolve('../../..'),
       advertiseHost: '127.0.0.1',
       listenHost: '127.0.0.1',
-      port: address.port,
-      shell: '/bin/zsh'
+      port: address.port
     }
 
     const first = new HostGateway(options)
