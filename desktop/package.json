@@ -1,0 +1,42 @@
+{
+  "name": "pie-relay-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pie Relay 데스크톱 클라이언트 by cookai.dev",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "postinstall": "node scripts/ensure-rust.mjs --warn",
+    "pretauri": "node scripts/ensure-rust.mjs",
+    "setup:rust": "node scripts/ensure-rust.mjs --install",
+    "sidecar": "node scripts/build-sidecar.mjs",
+    "prepare-executor": "node scripts/prepare-executor.mjs",
+    "prepare-mobile-host": "node scripts/prepare-mobile-host.mjs",
+    "icon": "tauri icon app-icon.png",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "qrcode": "1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/qrcode": "^1.5.5",
+    "@vitejs/plugin-react": "^6.0.4",
+    "typescript": "^5.6.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}

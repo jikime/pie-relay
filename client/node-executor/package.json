@@ -1,0 +1,33 @@
+{
+  "name": "pie-relay-node-executor",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Pie Relay stdio adapter for the Claude Agent SDK",
+  "bin": {
+    "pie-relay-node-executor": "./executor.mjs",
+    "pie-relay-acp-executor": "./acp-executor.mjs",
+    "pie-relay-codex-acp": "./codex-acp-adapter.mjs",
+    "claude": "./claude-cli.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.64.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.218",
+    "@anthropic-ai/sdk": "^0.113.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@xterm/addon-serialize": "0.15.0-beta.287",
+    "@xterm/headless": "6.1.0-beta.287",
+    "@xterm/xterm": "6.1.0-beta.287",
+    "node-pty": "^1.1.0",
+    "zod": "^4.4.3"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.11"
+  }
+}

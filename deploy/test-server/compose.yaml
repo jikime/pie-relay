@@ -1,0 +1,381 @@
+name: pie-sandbox-test
+
+# 이 Compose 파일은 221.143.48.77 공유 서버 전용이다. 기존 Traefik과 80/443을
+# 재사용하므로 자체 Traefik 서비스나 host port를 만들지 않는다.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pie_relay
+      POSTGRES_USER: pie_relay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [control, web-chat-data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pie_relay -d pie_relay"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    cpus: 1.0
+    mem_limit: 2g
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - traefik.enable=false
+
+  relay:
+    build:
+      context: ../../server
+      dockerfile: Dockerfile
+    image: ${PIE_RELAY_IMAGE:-pie-relay-server:test}
+    restart: unless-stopped
+    command: ["-addr=:13412"]
+    environment:
+      RELAY_JWT_SECRET: ${RELAY_JWT_SECRET:?set RELAY_JWT_SECRET}
+      RELAY_NODE_ID: ${RELAY_NODE_ID:-sandbox-relay-01}
+      RELAY_POOL_ID: ${RELAY_POOL_ID:-pie-relay-sandbox}
+      RELAY_ALLOWED_APPLICATIONS: ${RELAY_ALLOWED_APPLICATIONS:-pie-control,pie-relay-desktop,pie-mobile}
+      RELAY_REQUIRE_POOL_SCOPE: ${RELAY_REQUIRE_POOL_SCOPE:-true}
+      RELAY_ALLOW_DIRECT_TOKENS_WITHOUT_POOL_SCOPE: ${RELAY_ALLOW_DIRECT_TOKENS_WITHOUT_POOL_SCOPE:-true}
+      RELAY_PUBLIC_URL: ${RELAY_PUBLIC_URL:-https://relay-test.cookai.dev}
+      RELAY_MOBILE_STATE_FILE: /var/lib/pie-relay/relay/mobile-state.json
+      HOST_ENROLL_SECRET: ${HOST_ENROLL_SECRET:?set HOST_ENROLL_SECRET}
+      # edge는 다른 Compose 프로젝트와 공유하므로 `manager`/`relay` 같은
+      # 짧은 DNS 별칭을 쓰면 엉뚱한 스택으로 라우팅될 수 있다.
+      PIE_CONTROL_PLANE_URL: http://${PIE_MANAGER_INTERNAL_ALIAS:-pie-sandbox-test-manager}:19090
+      PIE_CONTROL_PLANE_TOKEN: ${PIE_RELAY_PRESENCE_TOKEN:?set PIE_RELAY_PRESENCE_TOKEN}
+      PIE_RELAY_CONTROL_URL: http://${PIE_RELAY_INTERNAL_ALIAS:-pie-sandbox-test-relay}:13412
+      PIE_RELAY_CONTROL_TOKEN: ${PIE_RELAY_CONTROL_TOKEN:?set PIE_RELAY_CONTROL_TOKEN}
+      PIE_RELAY_METRICS_TOKEN: ${PIE_RELAY_METRICS_TOKEN:?set PIE_RELAY_METRICS_TOKEN}
+      RELAY_ALLOWED_ORIGINS: ${RELAY_ALLOWED_ORIGINS:-tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://cookai.dev,https://*.cookai.dev}
+      RELAY_ALLOW_LEGACY_QUERY_TICKET: "false"
+      RELAY_ALLOW_LEGACY_UNSCOPED_TOKENS: "false"
+      RELAY_MAX_PARTICIPANTS_PER_ROOM: ${RELAY_MAX_PARTICIPANTS_PER_ROOM:-64}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - relay-state:/var/lib/pie-relay/relay
+    networks:
+      edge: {}
+      control:
+        aliases:
+          - ${PIE_RELAY_INTERNAL_ALIAS:-pie-sandbox-test-relay}
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/relay", "-healthcheck=http://127.0.0.1:13412/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 128
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=kroot-shared-edge-network
+      - 'traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.rule=Host(`${PIE_RELAY_HOST:-relay-test.cookai.dev}`)'
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.entrypoints=websecure
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.priority=${PIE_TRAEFIK_ROUTE_PRIORITY:-100}
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.tls=true
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.tls.certresolver=kroot
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.service=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.middlewares=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay-limit
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay-limit.ratelimit.average=100
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay-limit.ratelimit.burst=200
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.loadbalancer.server.port=13412
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.loadbalancer.healthcheck.path=/readyz
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.loadbalancer.healthcheck.interval=10s
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-relay.loadbalancer.healthcheck.timeout=3s
+
+  manager:
+    build:
+      context: ../..
+      dockerfile: executor-manager/Dockerfile.manager
+    image: ${PIE_MANAGER_IMAGE:-pie-executor-manager:test}
+    restart: unless-stopped
+    environment:
+      PIE_EXECUTOR_MANAGER_ADDR: :19090
+      PIE_EXECUTOR_MANAGER_TOKEN: ${PIE_MANAGER_ADMIN_TOKEN:?set PIE_MANAGER_ADMIN_TOKEN}
+      PIE_RELAY_PRESENCE_TOKEN: ${PIE_RELAY_PRESENCE_TOKEN:?set PIE_RELAY_PRESENCE_TOKEN}
+      PIE_RELAY_METRICS_TOKEN: ${PIE_RELAY_METRICS_TOKEN:?set PIE_RELAY_METRICS_TOKEN}
+      PIE_DEVICE_AUTH_SECRET: ${PIE_DEVICE_AUTH_SECRET:-}
+      PIE_AUTH_INTROSPECTION_URL: ${PIE_AUTH_INTROSPECTION_URL:-}
+      PIE_AUTH_CLIENT_ID: ${PIE_AUTH_CLIENT_ID:-}
+      PIE_AUTH_CLIENT_SECRET: ${PIE_AUTH_CLIENT_SECRET:-}
+      PIE_AUTH_HTTP_TIMEOUT: ${PIE_AUTH_HTTP_TIMEOUT:-5s}
+      PIE_AUTH_CACHE_TTL: ${PIE_AUTH_CACHE_TTL:-30s}
+      PIE_AUTH_NEGATIVE_CACHE_TTL: ${PIE_AUTH_NEGATIVE_CACHE_TTL:-5s}
+      PIE_CORS_ALLOWED_ORIGINS: ${PIE_CORS_ALLOWED_ORIGINS:-tauri://localhost,http://tauri.localhost,https://tauri.localhost,http://localhost:1420,http://127.0.0.1:1420,https://api-relay.cookai.dev,https://admin-relay.cookai.dev,https://api-relay-test.cookai.dev,https://admin-relay-test.cookai.dev}
+      PIE_USER_WEBHOOK_SECRET: ${PIE_USER_WEBHOOK_SECRET:?set PIE_USER_WEBHOOK_SECRET}
+      PIE_DEFAULT_MAX_SESSIONS: ${PIE_DEFAULT_MAX_SESSIONS:-4}
+      PIE_DEFAULT_MAX_PARTICIPANTS: ${PIE_DEFAULT_MAX_PARTICIPANTS:-16}
+      PIE_CONTROL_OPERATION_RETENTION: ${PIE_CONTROL_OPERATION_RETENTION:-168h}
+      PIE_CONTROL_RECONCILE_CONCURRENCY: ${PIE_CONTROL_RECONCILE_CONCURRENCY:-2}
+      PIE_CONTROL_DATABASE_URL: postgres://pie_relay:${POSTGRES_PASSWORD}@postgres:5432/pie_relay?sslmode=disable
+      PIE_CONTROL_REGISTRY_DIR: ${PIE_TEST_DATA_DIR:?set PIE_TEST_DATA_DIR}/control
+      PIE_EXECUTOR_REGISTRY_DIR: ${PIE_TEST_DATA_DIR:?set PIE_TEST_DATA_DIR}/registry
+      PIE_EXECUTOR_BLOB_DIR: ${PIE_EXECUTOR_VOLUME_DIR:?set PIE_EXECUTOR_VOLUME_DIR}/blobs
+      PIE_EXECUTOR_WORK_DIR: ${PIE_EXECUTOR_VOLUME_DIR:?set PIE_EXECUTOR_VOLUME_DIR}/workspaces
+      PIE_EXECUTOR_STATE_DIR: ${PIE_EXECUTOR_VOLUME_DIR:?set PIE_EXECUTOR_VOLUME_DIR}/executor-state
+      PIE_EXECUTOR_STATE_SEED_DIR: ${PIE_TEST_DATA_DIR:?set PIE_TEST_DATA_DIR}/claude-state-seed
+      PIE_KROOT_COMMON_BUNDLE_DIR: ${PIE_TEST_DATA_DIR:?set PIE_TEST_DATA_DIR}/kroot-common/current
+      PIE_KROOT_COMMON_BUNDLE_VERSION: ${PIE_KROOT_COMMON_BUNDLE_VERSION:-unknown}
+      PIE_CLAUDE_AUTH_DIR: ${PIE_TEST_DATA_DIR:?set PIE_TEST_DATA_DIR}/claude-auth
+      PIE_CLAUDE_AUTH_LOGIN_DIR: ${PIE_TEST_DATA_DIR:?set PIE_TEST_DATA_DIR}/claude-auth/login
+      PIE_CLAUDE_AUTH_REQUIRED: ${PIE_CLAUDE_AUTH_REQUIRED:-true}
+      PIE_CLAUDE_AUTH_ROLLOUT_CONCURRENCY: ${PIE_CLAUDE_AUTH_ROLLOUT_CONCURRENCY:-2}
+      PIE_CLAUDE_SUBSCRIPTION_MAX_CONCURRENT_TURNS: ${PIE_CLAUDE_SUBSCRIPTION_MAX_CONCURRENT_TURNS:-4}
+      PIE_CHAT_JOURNAL_DIR: ${PIE_TEST_DATA_DIR:?set PIE_TEST_DATA_DIR}/chat-journal
+      PIE_CHAT_JOURNAL_MAX_BYTES: ${PIE_CHAT_JOURNAL_MAX_BYTES:-67108864}
+      PIE_CHAT_EVENT_MAX_BYTES: ${PIE_CHAT_EVENT_MAX_BYTES:-8388608}
+      PIE_CHAT_IDLE_SCAN_INTERVAL: ${PIE_CHAT_IDLE_SCAN_INTERVAL:-1m}
+      PIE_CHAT_SESSION_IDLE_TIMEOUT: ${PIE_CHAT_SESSION_IDLE_TIMEOUT:-15m}
+      PIE_EXECUTOR_IDLE_TIMEOUT: ${PIE_EXECUTOR_IDLE_TIMEOUT:-1h}
+      PIE_EXECUTOR_MANAGER_ID: ${PIE_EXECUTOR_MANAGER_ID:-sandbox-node-01}
+      PIE_EXECUTOR_IMAGE: ${PIE_EXECUTOR_IMAGE:-pie-relay-client-kroot:test}
+      PIE_EXECUTOR_CONTAINER_USER: 10001:10001
+      PIE_EXECUTOR_KROOT_AUTO_LINK: ${PIE_EXECUTOR_KROOT_AUTO_LINK:-true}
+      # 사용자별 격리 컨테이너에서는 Claude 도구 승인 팝업 없이 자동 실행한다.
+      # Host OS/데스크톱 직접 연결에는 이 설정을 전파하지 않는다.
+      PIE_EXECUTOR_PERMISSION_MODE: ${PIE_EXECUTOR_PERMISSION_MODE:-bypassPermissions}
+      PIE_EXECUTOR_NETWORK: ${PIE_EXECUTOR_NETWORK:-pie-sandbox-test-executor}
+      PIE_EXECUTOR_REQUIRE_ISOLATED_NETWORK: ${PIE_EXECUTOR_REQUIRE_ISOLATED_NETWORK:-true}
+      PIE_EXECUTOR_ALLOW_USER_NAMESPACES: ${PIE_EXECUTOR_ALLOW_USER_NAMESPACES:-false}
+      PIE_EXECUTOR_CPUS: ${PIE_EXECUTOR_CPUS:-1}
+      PIE_EXECUTOR_MEMORY: ${PIE_EXECUTOR_MEMORY:-4g}
+      PIE_EXECUTOR_MEMORY_SWAP: ${PIE_EXECUTOR_MEMORY_SWAP:-4g}
+      PIE_EXECUTOR_PIDS_LIMIT: ${PIE_EXECUTOR_PIDS_LIMIT:-256}
+      PIE_EXECUTOR_DISK_QUOTA_BYTES: ${PIE_EXECUTOR_DISK_QUOTA_BYTES:-21474836480}
+      PIE_EXECUTOR_DISK_HEADROOM_BYTES: ${PIE_EXECUTOR_DISK_HEADROOM_BYTES:-21474836480}
+      PIE_EXECUTOR_DISK_SCAN_INTERVAL: ${PIE_EXECUTOR_DISK_SCAN_INTERVAL:-1m}
+      PIE_EXECUTOR_QUEUE_CAPACITY: ${PIE_EXECUTOR_QUEUE_CAPACITY:-16}
+      PIE_EXECUTOR_WORKERS: ${PIE_EXECUTOR_WORKERS:-2}
+      PIE_EXECUTOR_PROVISION_CONCURRENCY: ${PIE_EXECUTOR_PROVISION_CONCURRENCY:-1}
+      PIE_EXECUTOR_MAX_EXECUTORS: ${PIE_EXECUTOR_MAX_EXECUTORS:-4}
+      PIE_EXECUTOR_RETAINED_JOBS: ${PIE_EXECUTOR_RETAINED_JOBS:-500}
+      PIE_EXECUTOR_JOB_TIMEOUT: ${PIE_EXECUTOR_JOB_TIMEOUT:-30m}
+      # 사용자 Executor는 Relay와 Docker network를 공유하지 않는다.
+      # 인터넷 egress로 TLS/WSS 공개 주소에만 접속해 Executor 간 east-west를 막는다.
+      PIE_RELAY_URL: ${PIE_EXECUTOR_RELAY_URL:-wss://relay-test.cookai.dev/ws/agent}
+      PIE_RELAY_PUBLIC_URL: ${RELAY_PUBLIC_URL:-https://relay-test.cookai.dev}
+      PIE_RELAY_CONTROL_URL: http://${PIE_RELAY_INTERNAL_ALIAS:-pie-sandbox-test-relay}:13412
+      PIE_RELAY_CONTROL_TOKEN: ${PIE_RELAY_CONTROL_TOKEN:?set PIE_RELAY_CONTROL_TOKEN}
+      PIE_RELAY_JWT_SECRET: ${RELAY_JWT_SECRET:?set RELAY_JWT_SECRET}
+      PIE_RELAY_ROUTING_SECRET: ${PIE_RELAY_ROUTING_SECRET:-}
+      PIE_RELAY_DEFAULT_APPLICATION_ID: ${PIE_RELAY_DEFAULT_APPLICATION_ID:-pie-control}
+      PIE_RELAY_DEFAULT_POOL_ID: ${RELAY_POOL_ID:-pie-relay-sandbox}
+      PIE_RELAY_HEARTBEAT_TIMEOUT: ${PIE_RELAY_HEARTBEAT_TIMEOUT:-90s}
+      PIE_PREVIEW_DOMAIN: ${PIE_PREVIEW_DOMAIN:-preview.kroot.io}
+      PIE_PREVIEW_PUBLIC_SCHEME: ${PIE_PREVIEW_PUBLIC_SCHEME:-https}
+      PIE_PREVIEW_PUBLIC_PORT: ${PIE_PREVIEW_PUBLIC_PORT:-0}
+      PIE_PREVIEW_GATEWAY_CONTAINER: ${PIE_PREVIEW_GATEWAY_CONTAINER:-pie-sandbox-test-preview-gateway}
+      PIE_PREVIEW_GATEWAY_TOKEN: ${PIE_PREVIEW_GATEWAY_TOKEN:?set PIE_PREVIEW_GATEWAY_TOKEN}
+      PIE_PREVIEW_ACCESS_SECRET: ${PIE_PREVIEW_ACCESS_SECRET:?set PIE_PREVIEW_ACCESS_SECRET}
+      PIE_PREVIEW_RECONCILE_INTERVAL: ${PIE_PREVIEW_RECONCILE_INTERVAL:-2s}
+      PIE_PREVIEW_DEFAULT_TTL: ${PIE_PREVIEW_DEFAULT_TTL:-4h}
+      PIE_PREVIEW_MAX_TTL: ${PIE_PREVIEW_MAX_TTL:-24h}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PIE_TEST_DATA_DIR:?set PIE_TEST_DATA_DIR}:${PIE_TEST_DATA_DIR:?set PIE_TEST_DATA_DIR}:z
+      # /backup 마운트 장애 시 Docker가 root filesystem에 같은 이름의 빈
+      # 디렉터리를 자동 생성해 버리지 않도록 존재하는 Host 경로만 허용한다.
+      - type: bind
+        source: ${PIE_EXECUTOR_VOLUME_DIR:?set PIE_EXECUTOR_VOLUME_DIR}
+        target: ${PIE_EXECUTOR_VOLUME_DIR:?set PIE_EXECUTOR_VOLUME_DIR}
+        bind:
+          create_host_path: false
+    networks:
+      edge: {}
+      control:
+        aliases:
+          - ${PIE_MANAGER_INTERNAL_ALIAS:-pie-sandbox-test-manager}
+      manager-egress: {}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      relay:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:19090/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 256
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=kroot-shared-edge-network
+      - 'traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api.rule=Host(`${PIE_MANAGER_API_HOST:-api-relay-test.cookai.dev}`)'
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api.entrypoints=websecure
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api.priority=${PIE_TRAEFIK_ROUTE_PRIORITY:-100}
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api.tls=true
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api.tls.certresolver=kroot
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api.service=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-manager
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api.middlewares=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api-limit
+      - 'traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin.rule=Host(`${PIE_MANAGER_ADMIN_HOST:-admin-relay-test.cookai.dev}`) && (PathPrefix(`/admin`) || PathPrefix(`/v1/admin`))'
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin.entrypoints=websecure
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin.priority=${PIE_TRAEFIK_ROUTE_PRIORITY:-100}
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin.tls=true
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin.tls.certresolver=kroot
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin.service=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-manager
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin.middlewares=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin-limit
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api-limit.ratelimit.average=50
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-api-limit.ratelimit.burst=100
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin-limit.ratelimit.average=20
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-admin-limit.ratelimit.burst=40
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-manager.loadbalancer.server.port=19090
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-manager.loadbalancer.healthcheck.path=/readyz
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-manager.loadbalancer.healthcheck.interval=10s
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-manager.loadbalancer.healthcheck.timeout=3s
+
+  preview-gateway:
+    build:
+      context: ../..
+      dockerfile: executor-manager/Dockerfile.preview-gateway
+    image: ${PIE_PREVIEW_GATEWAY_IMAGE:-pie-preview-gateway:test}
+    container_name: ${PIE_PREVIEW_GATEWAY_CONTAINER:-pie-sandbox-test-preview-gateway}
+    restart: unless-stopped
+    environment:
+      PIE_PREVIEW_GATEWAY_ADDR: :18080
+      PIE_PREVIEW_MANAGER_URL: http://${PIE_MANAGER_INTERNAL_ALIAS:-pie-sandbox-test-manager}:19090
+      PIE_PREVIEW_DOMAIN: ${PIE_PREVIEW_DOMAIN:-preview.kroot.io}
+      PIE_PREVIEW_GATEWAY_TOKEN: ${PIE_PREVIEW_GATEWAY_TOKEN:?set PIE_PREVIEW_GATEWAY_TOKEN}
+      PIE_PREVIEW_ACCESS_SECRET: ${PIE_PREVIEW_ACCESS_SECRET:?set PIE_PREVIEW_ACCESS_SECRET}
+      PIE_PREVIEW_ROUTE_CACHE_TTL: ${PIE_PREVIEW_ROUTE_CACHE_TTL:-2s}
+      PIE_PREVIEW_SESSION_TTL: ${PIE_PREVIEW_SESSION_TTL:-8h}
+      PIE_PREVIEW_MAX_BODY_BYTES: ${PIE_PREVIEW_MAX_BODY_BYTES:-67108864}
+      PIE_PREVIEW_MAX_CONNECTIONS: ${PIE_PREVIEW_MAX_CONNECTIONS:-512}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      edge: {}
+      control: {}
+    depends_on:
+      manager:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:18080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 256
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=kroot-shared-edge-network
+      - 'traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-previews.rule=HostRegexp(`[a-z0-9-]+\.${PIE_PREVIEW_DOMAIN:-preview.kroot.io}`)'
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-previews.entrypoints=websecure
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-previews.tls=true
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-previews.service=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-gateway
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-previews.middlewares=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-limit,${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-headers
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-limit.ratelimit.average=100
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-limit.ratelimit.burst=200
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-headers.headers.contenttypenosniff=true
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-headers.headers.referrerpolicy=no-referrer
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-headers.headers.customresponseheaders.X-Robots-Tag=noindex,nofollow,noarchive
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-gateway.loadbalancer.server.port=18080
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-gateway.loadbalancer.healthcheck.path=/healthz
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-gateway.loadbalancer.healthcheck.interval=10s
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-preview-gateway.loadbalancer.healthcheck.timeout=3s
+
+  web-chat:
+    profiles: [web-chat]
+    build:
+      context: ../../examples/third-party-web-chat
+      dockerfile: Dockerfile
+    image: ${PIE_WEB_CHAT_IMAGE:-pie-third-party-web-chat:test}
+    restart: unless-stopped
+    user: "${PIE_WEB_CHAT_UID:-1000}:${PIE_WEB_CHAT_GID:-1000}"
+    environment:
+      PIE_MANAGER_URL: ${PIE_WEB_CHAT_MANAGER_URL:-https://api-relay-test.cookai.dev}
+      PIE_INTEGRATION_ID: ${PIE_WEB_CHAT_INTEGRATION_ID:-cookai-e2e}
+      PIE_INTEGRATION_TOKEN_FILE: /run/pie-web-chat/integration-token
+      PIE_WEB_CHAT_USERS_FILE: /run/pie-web-chat/users.json
+      PIE_WEB_CHAT_DATABASE_URL_FILE: /run/pie-web-chat/database-url
+      PIE_WEB_CHAT_CREDENTIAL_KEY_FILE: /run/pie-web-chat/credential-key
+      PIE_WEB_CHAT_HOST: 0.0.0.0
+      PIE_WEB_CHAT_PORT: 4175
+      PIE_WEB_CHAT_REGISTRATION_ENABLED: ${PIE_WEB_CHAT_REGISTRATION_ENABLED:-true}
+      PIE_WEB_CHAT_SECURE_COOKIE: "true"
+      PIE_WEB_CHAT_PUBLIC_ORIGIN: https://${PIE_WEB_CHAT_PUBLIC_HOST:-chat-relay.cookai.dev}
+      PIE_WEB_CHAT_SESSION_TTL_SECONDS: 28800
+      PIE_KROOT_SERVER_URL: ${PIE_KROOT_SERVER_URL:-grpcs://adk-server.kroot.io}
+      PIE_KROOT_RELAY_URL: ${PIE_KROOT_RELAY_URL:-wss://adk-relay.kroot.io/ws/agent}
+      npm_config_cache: /tmp/npm-cache
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /app/.next/cache:rw,noexec,nosuid,size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ${PIE_WEB_CHAT_USERS_FILE:-/home/kaonkroot/pie-sandbox-test/web-chat/users.json}:/run/pie-web-chat/users.json:ro,z
+      - ${PIE_WEB_CHAT_INTEGRATION_TOKEN_FILE:-/home/kaonkroot/pie-sandbox-test/integration-e2e.token}:/run/pie-web-chat/integration-token:ro,z
+      - ${PIE_WEB_CHAT_DATABASE_URL_FILE:-/home/kaonkroot/pie-sandbox-test/web-chat/database-url}:/run/pie-web-chat/database-url:ro,z
+      - ${PIE_WEB_CHAT_CREDENTIAL_KEY_FILE:-/home/kaonkroot/pie-sandbox-test/web-chat/credential-key}:/run/pie-web-chat/credential-key:ro,z
+    networks: [edge, manager-egress, web-chat-data]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # API만 정상이고 Next.js 화면 SSR이 500인 경우도 배포 실패로 잡는다.
+      test: ["CMD", "node", "-e", "Promise.all(['/api/health','/'].map(p=>fetch('http://127.0.0.1:4175'+p).then(r=>{if(!r.ok)throw new Error(p+' '+r.status)}))).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 256
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=kroot-shared-edge-network
+      - 'traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.rule=Host(`${PIE_WEB_CHAT_PUBLIC_HOST:-chat-relay.cookai.dev}`)'
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.entrypoints=websecure
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.tls=true
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.tls.certresolver=kroot
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.service=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat
+      - traefik.http.routers.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.middlewares=${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat-limit
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat-limit.ratelimit.average=30
+      - traefik.http.middlewares.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat-limit.ratelimit.burst=60
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.loadbalancer.server.port=4175
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.loadbalancer.healthcheck.path=/api/health
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.loadbalancer.healthcheck.interval=10s
+      - traefik.http.services.${PIE_TRAEFIK_ROUTE_PREFIX:-pie-sandbox-test}-web-chat.loadbalancer.healthcheck.timeout=3s
+
+volumes:
+  postgres-data:
+  relay-state:
+
+networks:
+  edge:
+    external: true
+    name: kroot-shared-edge-network
+  control:
+    internal: true
+  executor:
+    external: true
+    name: ${PIE_EXECUTOR_NETWORK:-pie-sandbox-test-executor}
+  manager-egress:
+  web-chat-data:
+    internal: true

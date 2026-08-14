@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Frontend build output
+dist/
+dist-ssr/
+*.local
+
+# Vite / test caches
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Rust / Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Sidecar binaries (built by scripts/build-sidecar.mjs — never commit)
+src-tauri/binaries/
+
+# Staged Node executor resource (built by scripts/prepare-executor.mjs — 200MB+,
+# reinstalled from lockfile, never commit)
+src-tauri/resources/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log

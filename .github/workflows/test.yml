@@ -1,0 +1,92 @@
+name: test
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: client/go.mod
+          cache-dependency-path: client/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check installer shell syntax
+        run: sh -n install.sh
+      - name: Test latest, pinned and tampered installs
+        run: node scripts/e2e/pie-client-installer.mjs
+
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [server, client, executor-manager]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Test with race detector
+        working-directory: ${{ matrix.module }}
+        run: go test -race ./...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            desktop/package-lock.json
+            client/node-executor/package-lock.json
+      - name: Test node executor
+        working-directory: client/node-executor
+        run: npm ci && npm test && npm audit --omit=dev
+      - name: Test and build desktop
+        working-directory: desktop
+        run: npm ci && npm test && npm run build
+
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Test Pie mobile app
+        working-directory: pie-mobile/upstream/mobile
+        run: pnpm install --frozen-lockfile && pnpm test && pnpm typecheck && pnpm lint
+      - name: Test mobile host gateway
+        working-directory: pie-mobile/adapter/host-gateway
+        run: pnpm install --frozen-lockfile && pnpm test && pnpm typecheck && pnpm build
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Relay image
+        run: docker build -t pie-relay-server:test server
+      - name: Build Executor image
+        run: docker build -f executor-manager/Dockerfile.executor -t pie-relay-client:test .
+      - name: Build Manager image
+        run: docker build -f executor-manager/Dockerfile.manager -t pie-executor-manager:test .

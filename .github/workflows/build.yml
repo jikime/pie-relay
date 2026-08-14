@@ -1,0 +1,264 @@
+name: build-desktop
+
+# 데스크톱 앱(Tauri) 설치 파일을 클라우드에서 빌드한다.
+# - Windows x64 설치파일(nsis .exe / msi)  ← 일반 x64 Windows PC 배포용
+# - macOS 설치파일(.dmg)
+# GitHub 러너에는 이미 Windows용 MSVC Build Tools(link.exe) + WebView2,
+# macOS용 Xcode 가 설치돼 있어 로컬 툴체인(Parallels ARM 등) 없이도 빌드된다.
+#
+# 실행: Actions 탭 → build-desktop → "Run workflow" 버튼(수동), 또는 v* 태그 push.
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+          - os: macos-latest
+            label: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 사이드카(clientd, Go) 빌드용. beforeBuildCommand 의 `npm run sidecar` 가 사용.
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            desktop/package-lock.json
+            client/node-executor/package-lock.json
+
+      # 러너 네이티브 타깃(windows=x86_64-pc-windows-msvc, macOS=aarch64-apple-darwin).
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: npm ci
+
+      # tauri build 가 beforeBuildCommand(sidecar 빌드 + executor 스테이징 + vite 빌드)를
+      # 실행한 뒤 OS별 설치 파일을 번들링한다. pretauri 훅의 Rust 점검은 CI 에 cargo 가
+      # 있으므로 통과한다.
+      - name: Build app
+        working-directory: desktop
+        run: npm run tauri build
+
+      - name: Upload Windows installers
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-relay-${{ matrix.label }}
+          if-no-files-found: error
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+
+      - name: Upload macOS installer
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-relay-${{ matrix.label }}
+          if-no-files-found: error
+          path: |
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
+
+  pie-client:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - runner: macos-latest
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: client/go.mod
+          cache-dependency-path: client/go.sum
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/node-executor/package-lock.json
+
+      - name: Install Linux native build prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3 make g++
+
+      - name: Test Pie Client
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        working-directory: client
+        run: go test ./...
+
+      - name: Install native Node Executor runtime
+        working-directory: client/node-executor
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Verify native Node Executor runtime
+        working-directory: client/node-executor
+        run: |
+          node -e "require('node-pty')"
+          test -x node_modules/.bin/claude-agent-acp
+
+      - name: Build native Pie Client package
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="dev-${GITHUB_SHA:0:12}"
+          fi
+          build_date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          ldflags="-s -w -X main.clientVersion=${version} -X main.clientCommit=${GITHUB_SHA} -X main.clientBuildDate=${build_date}"
+          runtime_files=(
+            acp-executor.mjs
+            claude-cli.mjs
+            codex-acp-adapter.mjs
+            executor.mjs
+            preview-launcher.mjs
+            pty-host.mjs
+            workspace.mjs
+            package.json
+            package-lock.json
+          )
+          goos="${{ matrix.goos }}"
+          goarch="${{ matrix.goarch }}"
+          package_dir="dist/package-${goos}-${goarch}"
+          mkdir -p "$package_dir/node-executor"
+          CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+            go -C client build -trimpath -buildvcs=false -ldflags "$ldflags" \
+            -o "$GITHUB_WORKSPACE/$package_dir/pie-client-bin" ./cmd/client
+          printf '%s\n' "$version" > "$package_dir/VERSION"
+          printf '%s\n' "$goos/$goarch" > "$package_dir/RUNTIME_READY"
+          for runtime_file in "${runtime_files[@]}"; do
+            cp "client/node-executor/$runtime_file" "$package_dir/node-executor/$runtime_file"
+          done
+          cp -R client/node-executor/node_modules "$package_dir/node-executor/node_modules"
+          COPYFILE_DISABLE=1 tar -C "$package_dir" -czf "dist/pie-client_${goos}_${goarch}.tar.gz" .
+
+      - name: Verify native release package
+        run: |
+          set -euo pipefail
+          check_dir="$RUNNER_TEMP/pie-client-release-check"
+          mkdir -p "$check_dir"
+          tar -xzf "dist/pie-client_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" -C "$check_dir"
+          "$check_dir/pie-client-bin" version --json
+          (cd "$check_dir/node-executor" && node -e "require('node-pty')")
+          test -x "$check_dir/node-executor/node_modules/.bin/claude-agent-acp"
+
+      - name: Upload native Pie Client package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pie-client-package-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          path: dist/pie-client_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+
+  pie-client-checksums:
+    needs: pie-client
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download native Pie Client packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pie-client-package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate and verify checksums
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -name 'pie-client_*.tar.gz' | wc -l)" -eq 4
+          (cd dist && sha256sum pie-client_*.tar.gz > pie-client_checksums.txt)
+          (cd dist && sha256sum --check pie-client_checksums.txt)
+
+      - name: Upload complete Pie Client release
+        uses: actions/upload-artifact@v4
+        with:
+          name: pie-client-release
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          path: |
+            dist/pie-client_*.tar.gz
+            dist/pie-client_checksums.txt
+
+  # v* 태그로 push 되면 두 빌드가 끝난 뒤 GitHub Release 를 만들고 설치 파일을
+  # 첨부한다. 수동 실행(workflow_dispatch)에는 릴리스를 만들지 않고 아티팩트만 남긴다.
+  release:
+    needs: [build, pie-client-checksums]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 릴리스 생성/자산 업로드에 필요
+    steps:
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cli-relay-*
+          path: artifacts/desktop
+
+      - name: Download Pie Client release
+        uses: actions/download-artifact@v4
+        with:
+          name: pie-client-release
+          path: artifacts/pie-client
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 태그명이 릴리스 제목이 된다. 커밋 기반 릴리스 노트 자동 생성.
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/*.dmg
+            artifacts/**/pie-client_*.tar.gz
+            artifacts/**/pie-client_checksums.txt

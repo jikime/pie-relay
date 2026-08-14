@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.7
+
+# Local-only ACP integration image. The transport, Pie Client and ACP bridge are
+# production code; only the final LLM adapter is deterministic so CI/local
+# verification never needs a developer credential or paid API request.
+FROM pie-relay-client:latest
+
+USER root
+COPY scripts/e2e/fake-acp-agent.mjs /opt/pie-relay/e2e/fake-acp-agent.mjs
+RUN chmod 0555 /opt/pie-relay/e2e/fake-acp-agent.mjs \
+    && chown -R pie:pie /opt/pie-relay/e2e
+
+ENV PIE_ACP_AGENT_COMMAND=/usr/local/bin/node \
+    PIE_ACP_AGENT_ARGS_JSON='["/opt/pie-relay/e2e/fake-acp-agent.mjs"]'
+
+USER pie:pie

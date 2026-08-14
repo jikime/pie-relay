@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Pie Relay Control</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="forms.css" />
+  <link rel="stylesheet" href="auth.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">π</span><span><strong>Pie Relay</strong><small>CONTROL PLANE</small></span></div>
+      <nav id="navigation" aria-label="관리 화면">
+        <button class="nav-item active" data-view="overview">개요</button>
+        <button class="nav-item" data-view="users">사용자</button>
+        <button class="nav-item" data-view="devices">장치</button>
+        <button class="nav-item" data-view="sessions">세션</button>
+        <button class="nav-item" data-view="participants">접속자</button>
+        <button class="nav-item" data-view="grants">공유 권한</button>
+        <button class="nav-item" data-view="runtimes">컨테이너</button>
+        <button class="nav-item" data-view="claude-auth">Claude 인증</button>
+        <button class="nav-item" data-view="integrations">연동 서비스</button>
+        <button class="nav-item" data-view="integration-users">연동 사용자</button>
+        <button class="nav-item" data-view="projects">프로젝트</button>
+        <button class="nav-item" data-view="previews">웹 프리뷰</button>
+        <button class="nav-item" data-view="conversations">AI 대화</button>
+        <button class="nav-item" data-view="nodes">노드</button>
+        <button class="nav-item" data-view="operations">작업</button>
+        <button class="nav-item" data-view="audit">감사 로그</button>
+      </nav>
+      <div class="sidebar-status"><span id="stream-dot" class="status-dot"></span><span id="stream-label">연결 대기</span></div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <div><p class="eyebrow">PIELAB.AI · OPERATIONS</p><h1 id="view-title">운영 개요</h1></div>
+        <div class="top-actions">
+          <label class="search"><span>⌕</span><input id="search" type="search" placeholder="현재 화면 검색" /></label>
+          <button id="create" class="hidden">새로 만들기</button>
+          <button id="refresh" class="icon-button" title="새로 고침">↻</button>
+          <button id="credential" class="secondary">인증 변경</button>
+        </div>
+      </header>
+      <div id="notice" class="notice hidden" role="status"></div>
+      <section id="content" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <dialog id="auth-dialog">
+    <form method="dialog" id="auth-form">
+      <div class="dialog-mark">π</div>
+      <p class="eyebrow">PIE RELAY CONTROL</p>
+      <h2>운영자 인증</h2>
+      <p class="muted">Pie Admin 권한이 있는 토큰만 사용할 수 있습니다. 로컬에서는 <code>PIE_MANAGER_ADMIN_TOKEN</code>을 사용하세요. 제3자 Integration service token과 컨테이너에 저장할 사용자 PAT는 이 화면의 인증 토큰이 아닙니다.</p>
+      <div id="auth-error" class="notice error hidden" role="alert"></div>
+      <label>Pie Admin bearer token<textarea id="token-input" rows="4" autocomplete="off" spellcheck="false" required></textarea></label>
+      <label class="remember-auth"><input id="remember-token" type="checkbox" /> 이 브라우저에서 인증 기억</label>
+      <p class="muted">개인 장치에서만 사용하세요. 선택하지 않으면 현재 탭을 닫을 때 인증 정보가 삭제됩니다.</p>
+      <menu><button value="cancel" class="secondary">취소</button><button value="default" id="auth-submit">연결</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog">
+    <form method="dialog">
+      <h2 id="confirm-title">작업 확인</h2>
+      <p id="confirm-message" class="muted"></p>
+      <menu><button value="cancel" class="secondary">취소</button><button value="confirm" class="danger">실행</button></menu>
+    </form>
+  </dialog>
+  <dialog id="entity-dialog">
+    <form id="entity-form">
+      <p class="eyebrow">PIE CONTROL PLANE</p>
+      <h2 id="entity-title">새로 만들기</h2>
+      <div id="entity-fields" class="entity-fields"></div>
+      <menu><button type="button" id="entity-cancel" class="secondary">취소</button><button type="submit">저장</button></menu>
+    </form>
+  </dialog>
+  <dialog id="service-token-dialog">
+    <form method="dialog">
+      <p class="eyebrow">ONE-TIME SECRET</p>
+      <h2>Integration service token</h2>
+      <p class="muted">이 토큰은 다시 조회할 수 없습니다. 제3자 Backend의 secret manager에 지금 저장하세요.</p>
+      <label>Bearer token<textarea id="service-token-value" rows="4" readonly spellcheck="false"></textarea></label>
+      <menu><button value="default">확인</button></menu>
+    </form>
+  </dialog>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

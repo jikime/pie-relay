@@ -1,0 +1,32 @@
+diff --git a/index.js b/index.js
+index 4aef6c3..2a36e86 100644
+--- a/index.js
++++ b/index.js
+@@ -5,4 +5,11 @@ module.exports = expandTop;
+ 
++// Security backport for CVE-2026-14257.  The 1.x API is required by
++// minimatch@3 (React Native tooling), while the upstream resource limits only
++// ship in brace-expansion@5.  Bound both recursion depth and retained output.
++var DEFAULT_MAX = 10000;
++var MAX_INPUT_LENGTH = 4096;
++var MAX_BRACE_GROUPS = 64;
++
+ var escSlash = '\0SLASH'+Math.random()+'\0';
+ var escOpen = '\0OPEN'+Math.random()+'\0';
+ var escClose = '\0CLOSE'+Math.random()+'\0';
+@@ -65,7 +72,14 @@ function expandTop(str, options) {
+   if (!str)
+     return [];
+ 
++  // Treat pathological patterns as literals.  This is fail-safe for glob
++  // matching and prevents deep recursion before the result cap can apply.
++  var groups = (str.match(/\{/g) || []).length;
++  if (str.length > MAX_INPUT_LENGTH || groups > MAX_BRACE_GROUPS)
++    return [str];
++
+   options = options || {};
+-  var max = options.max == null ? Infinity : options.max;
++  var requestedMax = options.max == null ? DEFAULT_MAX : options.max;
++  var max = Math.max(0, Math.min(requestedMax, DEFAULT_MAX));
+ 
+   // I don't know why Bash 4.3 does this, but it does.

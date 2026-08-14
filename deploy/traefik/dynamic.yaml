@@ -1,0 +1,97 @@
+http:
+  routers:
+    relay-enroll:
+      rule: Host(`relay.cookai.dev`) && Path(`/host/enroll`)
+      priority: 110
+      entryPoints: [websecure]
+      service: relay
+      middlewares: [secure-headers, enroll-rate]
+      tls:
+        certResolver: letsencrypt
+    relay-join:
+      rule: Host(`relay.cookai.dev`) && Path(`/rooms/join`)
+      priority: 110
+      entryPoints: [websecure]
+      service: relay
+      middlewares: [secure-headers, join-rate]
+      tls:
+        certResolver: letsencrypt
+    relay-invites:
+      rule: Host(`relay.cookai.dev`) && Path(`/rooms/invites`)
+      priority: 110
+      entryPoints: [websecure]
+      service: relay
+      middlewares: [secure-headers, invite-rate]
+      tls:
+        certResolver: letsencrypt
+    relay:
+      rule: Host(`relay.cookai.dev`)
+      entryPoints: [websecure]
+      service: relay
+      middlewares: [secure-headers]
+      tls:
+        certResolver: letsencrypt
+    admin:
+      rule: Host(`admin-relay.cookai.dev`)
+      entryPoints: [websecure]
+      service: manager
+      middlewares: [secure-headers]
+      tls:
+        certResolver: letsencrypt
+    api:
+      rule: Host(`api-relay.cookai.dev`)
+      entryPoints: [websecure]
+      service: manager
+      middlewares: [secure-headers]
+      tls:
+        certResolver: letsencrypt
+    previews:
+      rule: HostRegexp(`[a-z0-9-]+\.preview\.kroot\.io`)
+      entryPoints: [websecure]
+      service: preview-gateway
+      middlewares: [preview-rate]
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    relay:
+      loadBalancer:
+        servers:
+          - url: http://relay:13412
+    manager:
+      loadBalancer:
+        servers:
+          - url: http://manager:19090
+    preview-gateway:
+      loadBalancer:
+        servers:
+          - url: http://preview-gateway:18080
+
+  middlewares:
+    enroll-rate:
+      rateLimit:
+        average: 5
+        period: 1s
+        burst: 10
+    join-rate:
+      rateLimit:
+        average: 20
+        period: 1s
+        burst: 40
+    invite-rate:
+      rateLimit:
+        average: 20
+        period: 1s
+        burst: 40
+    preview-rate:
+      rateLimit:
+        average: 100
+        period: 1s
+        burst: 200
+    secure-headers:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: no-referrer
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true

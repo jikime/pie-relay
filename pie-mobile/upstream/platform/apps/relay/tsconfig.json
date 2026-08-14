@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Repo root: the E2EE e2e test references the canonical mobile E2EE framing at
+    // <root>/src/shared (doc 32 baseline), so the rootDir boundary spans the repo. noEmit means this
+    // only defines the source boundary; the relay itself still never imports seal/open.
+    "rootDir": "../../.."
+  },
+  "include": ["src/**/*.ts"]
+}

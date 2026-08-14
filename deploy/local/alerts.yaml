@@ -1,0 +1,62 @@
+groups:
+  - name: pie-relay-local
+    rules:
+      - alert: PieRelayTargetDown
+        expr: up{job=~"pie-relay|pie-manager"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pie Relay local target is unavailable"
+      - alert: PieRelaySlowPeers
+        expr: increase(pie_relay_slow_peer_evicted_total[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pie Relay evicted a slow peer"
+      - alert: PieRelayPresenceDrops
+        expr: increase(pie_relay_presence_dropped_total[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pie Relay dropped Control Plane presence events"
+      - alert: PieManagerQueueSaturated
+        expr: pie_executor_manager_queue_capacity > 0 and pie_executor_manager_queue_depth / pie_executor_manager_queue_capacity > 0.8
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pie Executor Manager queue is above 80%"
+      - alert: PieExecutorDiskQuotaExceeded
+        expr: pie_executor_manager_disk_quota_exceeded > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "One or more Pie executors exceeded their disk quota"
+      - alert: PieExecutorNodeDiskLow
+        expr: pie_executor_manager_disk_free_bytes > 0 and pie_executor_manager_disk_free_bytes < 21474836480
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pie executor node has less than 20 GiB of disk headroom"
+      - alert: PieExecutorDiskScanErrors
+        expr: increase(pie_executor_manager_disk_scan_errors_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pie executor storage monitoring is failing"
+      - alert: PieManagerHTTP5xx
+        expr: sum(rate(pie_manager_http_requests_total{status=~"5.."}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pie Manager is returning elevated HTTP 5xx responses"
+      - alert: PieChatRequestFailures
+        expr: increase(pie_chat_gateway_requests_failed_total[10m]) > 2
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pie chat requests are repeatedly failing or being aborted"

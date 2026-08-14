@@ -1,0 +1,9 @@
+# Keep the cli-relay build context tiny + no host artifacts/secrets streamed.
+.git
+.gitignore
+*.log
+relay-dev
+/relay
+.env.local
+docs
+README.md

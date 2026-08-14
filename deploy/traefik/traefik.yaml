@@ -1,0 +1,30 @@
+api:
+  dashboard: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yaml
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: ops@cookai.dev
+      storage: /var/lib/traefik/acme.json
+      httpChallenge:
+        entryPoint: web
+
+accessLog: {}
+log:
+  level: INFO

@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.7
+
+# Local recovery/development overlay. It updates Pie Client without reinstalling
+# the large Node dependency tree. Release builds must still use
+# Dockerfile.executor so executor.mjs and npm dependencies are rebuilt too.
+FROM golang:1.25.12-alpine AS client-build
+WORKDIR /src/client
+COPY client/go.mod client/go.sum ./
+RUN go mod download
+COPY client/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pie-client ./cmd/client
+
+FROM pie-relay-client:latest
+USER root
+COPY --from=client-build /out/pie-client /usr/local/bin/pie-client
+USER pie:pie

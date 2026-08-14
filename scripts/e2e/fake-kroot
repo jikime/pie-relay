@@ -1,0 +1,81 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+  --help|-h)
+    printf 'Usage: kroot init [target] [project-name]\n'
+    exit 0
+    ;;
+  init) ;;
+  *)
+    echo "fake kroot supports only init" >&2
+    exit 2
+    ;;
+esac
+
+target="${2:-.}"
+project_name="${3:-$(basename "$PWD")}"
+app_target="$target/apps/web"
+mkdir -p "$target/.kroot" "$target/.claude" "$app_target"
+printf '%s\n' "$project_name" > "$target/.kroot/e2e-project-name"
+printf '{"permissions":{"allow":[]}}\n' > "$target/.claude/settings.json"
+printf '{"name":"pie-preview-e2e","private":true,"scripts":{"dev":"node server.mjs"}}\n' > "$app_target/package.json"
+cat > "$app_target/server.mjs" <<'EOF'
+import { createHash } from 'node:crypto'
+import { createServer } from 'node:http'
+
+const host = process.env.HOST || '127.0.0.1'
+const port = Number.parseInt(process.env.PORT || '3000', 10)
+
+const server = createServer(async (request, response) => {
+  if (request.url === '/stream') {
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+    response.write('first\n')
+    setTimeout(() => response.end('second\n'), 100)
+    return
+  }
+  const chunks = []
+  for await (const chunk of request) chunks.push(chunk)
+  response.writeHead(200, {
+    'content-type': 'application/json; charset=utf-8',
+    'set-cookie': [
+      '__Host-pie_preview=backend-must-not-replace; Path=/; Secure; HttpOnly',
+      'app_session=updated; Path=/; Secure; HttpOnly',
+    ],
+  })
+  response.end(JSON.stringify({
+    ok: true,
+    method: request.method,
+    body: Buffer.concat(chunks).toString(),
+    port,
+    cookie: request.headers.cookie || '',
+    internalHeaders: {
+      userId: request.headers['x-pie-user-id'] || '',
+      previewId: request.headers['x-pie-preview-id'] || '',
+      backend: request.headers['x-pie-backend'] || '',
+    },
+  }))
+})
+
+server.on('upgrade', (request, socket) => {
+  const key = request.headers['sec-websocket-key']
+  if (request.url !== '/ws' || typeof key !== 'string') {
+    socket.destroy()
+    return
+  }
+  const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64')
+  const payload = Buffer.from('preview-websocket-ok')
+  socket.write([
+    'HTTP/1.1 101 Switching Protocols',
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Accept: ${accept}`,
+    '',
+    '',
+  ].join('\r\n'))
+  socket.write(Buffer.concat([Buffer.from([0x81, payload.length]), payload]))
+  setTimeout(() => socket.end(), 25)
+})
+
+server.listen(port, host)
+EOF

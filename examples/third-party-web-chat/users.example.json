@@ -1,0 +1,12 @@
+[
+  {
+    "username": "alice",
+    "displayName": "Alice",
+    "externalUserId": "your-service-user-id-alice",
+    "passwordHash": "scrypt-v1$replace_with_npm_run_hash-password_output$replace_me",
+    "credential": {
+      "pat": "replace-with-alice-external-service-pat",
+      "issuer": "your-service"
+    }
+  }
+]

@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1.7
+
+ARG PIE_EXECUTOR_BASE_IMAGE=pie-relay-client:latest
+
+# Kroot keeps a local replace directive for kroot-proto. Supplying both
+# repositories as named BuildKit contexts makes the Linux build reproducible
+# without copying a macOS go-install artifact into the Executor image.
+FROM golang:1.25.12-alpine AS kroot-build
+RUN apk add --no-cache ca-certificates git
+WORKDIR /src/kroot-adk
+COPY --from=kroot-adk . ./
+COPY --from=kroot-proto . /src/kroot-proto/
+RUN go mod download \
+    && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/kroot ./cmd/kroot \
+    && mkdir -p /out/kroot-common/.claude \
+    && cp -a templates/.claude/skills /out/kroot-common/.claude/skills \
+    && cp -a templates/.claude/agents /out/kroot-common/.claude/agents \
+    && find /out/kroot-common -type d -exec chmod 0755 {} + \
+    && find /out/kroot-common -type f ! -perm -111 -exec chmod 0444 {} + \
+    && find /out/kroot-common -type f -perm -111 -exec chmod 0555 {} +
+
+FROM ${PIE_EXECUTOR_BASE_IMAGE}
+ARG KROOT_ADK_REVISION=unknown
+ARG KROOT_PROTO_REVISION=unknown
+LABEL ai.pielab.kroot-adk-revision="${KROOT_ADK_REVISION}" \
+      ai.pielab.kroot-proto-revision="${KROOT_PROTO_REVISION}"
+USER root
+COPY --from=kroot-build /out/kroot /usr/local/bin/kroot
+COPY --from=kroot-build /out/kroot-common /usr/local/share/kroot-common
+RUN chmod 0555 /usr/local/bin/kroot
+USER pie:pie

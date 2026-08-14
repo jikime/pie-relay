@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "참가자 모드는 코어 기본 권한만 쓰고, 호스트 모드는 clientd 사이드카 실행 권한을 스코프로 제한한다. 실제 spawn 은 Rust 커맨드에서 하지만(프런트는 shell 플러그인을 직접 호출하지 않음) 방어적으로 스코프를 선언한다.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/clientd",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    "shell:allow-kill"
+  ]
+}

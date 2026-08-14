@@ -1,0 +1,51 @@
+name: deploy-install-page
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - install.sh
+      - pages/**
+      - .github/workflows/pages.yml
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Prepare static site
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp pages/index.html _site/index.html
+          cp install.sh _site/install.sh
+          chmod 0644 _site/index.html _site/install.sh
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

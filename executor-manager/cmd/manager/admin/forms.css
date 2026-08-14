@@ -1,0 +1,47 @@
+.entity-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.entity-fields label {
+  margin: 0;
+}
+
+.entity-fields .wide {
+  grid-column: 1 / -1;
+}
+
+.entity-fields input,
+.entity-fields select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #303b50;
+  border-radius: 8px;
+  background: #090d14;
+  color: #dbe4f0;
+  font: inherit;
+}
+
+.entity-fields small {
+  color: #6f7d91;
+}
+
+.section-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+dialog label.remember-auth {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+dialog label.remember-auth input {
+  width: 16px;
+  height: 16px;
+  accent-color: #7c3aed;
+}

@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1.7
+
+FROM golang:1.25.12-alpine AS build
+WORKDIR /src
+COPY executor-manager/go.mod executor-manager/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY executor-manager/ ./
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pie-preview-gateway ./cmd/preview-gateway
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S pie \
+    && adduser -S -G pie -h /var/lib/pie-preview pie
+COPY --from=build /out/pie-preview-gateway /usr/local/bin/pie-preview-gateway
+USER pie:pie
+EXPOSE 18080
+ENTRYPOINT ["/usr/local/bin/pie-preview-gateway"]

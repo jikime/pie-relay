@@ -1,0 +1,42 @@
+[Unit]
+Description=Pie Relay WebSocket server (legacy unit name)
+Documentation=https://cookai.dev
+After=network-online.target
+Wants=network-online.target
+# 크래시/재시작 폭주 방지: 60초 안에 10회까지만 재시작 시도, 초과하면 멈춤(로그로 원인 확인).
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+# 시크릿(RELAY_JWT_SECRET / HOST_ENROLL_SECRET)은 유닛 파일이 아니라 이 파일에서 주입.
+# 반드시 chmod 600 으로 보호할 것. 예시는 relay.env.example 참고.
+EnvironmentFile=/etc/cli-relay/relay.env
+# 바이너리 경로는 설치 위치에 맞게 조정. -addr 은 프록시가 붙는 내부 포트.
+# TLS 는 앞단 프록시(nginx 등)가 종단하므로 여기선 평문 리슨.
+ExecStart=/usr/local/bin/cli-relay -addr :13412
+
+# 세션 종료·크래시·재부팅에도 항상 살아있게 — 이게 "릴레이가 종종 죽는" 문제의 근본 해결.
+Restart=always
+RestartSec=2s
+TimeoutStopSec=30
+
+# 로그는 journald 로 (journalctl -u cli-relay -f 로 확인).
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cli-relay
+
+# --- 하드닝(선택, 권장) ---
+# 전용 계정으로 실행하려면 아래 두 줄 주석 해제하고 useradd 로 계정 생성:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin cli-relay
+#User=cli-relay
+#Group=cli-relay
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# 신규 설치는 pie-relay.service를 사용한다. 이 파일은 기존 /etc/cli-relay 배포의
+# 무중단 이전을 위한 호환 템플릿이다.
+
+[Install]
+WantedBy=multi-user.target

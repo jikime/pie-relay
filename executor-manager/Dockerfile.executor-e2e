@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.7
+
+# Rebuild only the small Go Pie Client layer on top of the already-built full
+# Executor image. This keeps the E2E image current without reinstalling the
+# large Claude Agent SDK dependency tree for every local verification run.
+ARG PIE_EXECUTOR_E2E_BASE_IMAGE=pie-relay-client:latest
+
+FROM golang:1.25.12-alpine AS client-build
+WORKDIR /src/client
+COPY client/go.mod client/go.sum ./
+RUN go mod download
+COPY client/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pie-client ./cmd/client
+
+FROM ${PIE_EXECUTOR_E2E_BASE_IMAGE}
+USER root
+COPY --from=client-build /out/pie-client /usr/local/bin/pie-client
+COPY scripts/e2e/fake-chat-agent.mjs /opt/pie-relay/e2e/fake-chat-agent.mjs
+COPY scripts/e2e/fake-kroot /usr/local/bin/kroot
+RUN chmod 0555 /opt/pie-relay/e2e/fake-chat-agent.mjs /usr/local/bin/kroot \
+    && chown -R pie:pie /opt/pie-relay/e2e
+ENV EXECUTOR_PATH=/opt/pie-relay/e2e/fake-chat-agent.mjs
+USER pie:pie

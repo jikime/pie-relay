@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Pie Client 설치</title>
+  <style>
+    :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; background: #f5f7fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 32px 20px; }
+    main { width: min(760px, 100%); background: #fff; border: 1px solid #dfe5ef; border-radius: 24px; padding: clamp(28px, 6vw, 56px); box-shadow: 0 24px 80px rgba(34, 49, 82, .12); }
+    .brand { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 14px; color: #fff; background: linear-gradient(145deg, #7657ff, #4b8cff); font-size: 25px; font-weight: 800; }
+    h1 { margin: 22px 0 10px; font-size: clamp(32px, 6vw, 48px); line-height: 1.08; letter-spacing: -.04em; }
+    p { color: #5b6578; line-height: 1.7; }
+    code { font-family: "SFMono-Regular", Consolas, monospace; }
+    pre { margin: 24px 0; padding: 20px; overflow-x: auto; border-radius: 14px; color: #eaf0ff; background: #111827; font-size: 14px; line-height: 1.6; }
+    h2 { margin-top: 36px; font-size: 18px; }
+    ul { padding-left: 22px; color: #5b6578; line-height: 1.9; }
+    a { color: #5f49db; font-weight: 650; }
+    .note { padding: 14px 16px; border-radius: 12px; background: #f0edff; color: #493a96; font-size: 14px; }
+    @media (prefers-color-scheme: dark) {
+      :root { color: #eef2ff; background: #0d1220; }
+      main { background: #151c2d; border-color: #29344b; box-shadow: none; }
+      p, ul { color: #aeb9ce; }
+      .note { background: #282343; color: #cdc3ff; }
+      a { color: #a99aff; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="brand" aria-hidden="true">π</span>
+    <h1>Pie Client</h1>
+    <p>내 Mac 또는 Linux 컴퓨터를 Pie Relay 실행 장치로 안전하게 연결합니다. 설치 파일은 GitHub Release에서 내려받고 SHA-256 검증을 통과한 경우에만 설치됩니다.</p>
+
+    <h2>빠른 설치</h2>
+    <pre><code>curl -fsSL https://jikime.github.io/pie-relay/install.sh | sh</code></pre>
+    <p class="note">Node.js 22 이상과 사용하려는 Claude Code 또는 Codex CLI 로그인이 필요합니다. 설치 스크립트는 관리자 권한 없이 사용자 홈 아래에 설치합니다.</p>
+
+    <h2>장치 연결</h2>
+    <pre><code>pie-client connect \
+  --server https://연결-코드를-발급한-서비스 \
+  --code ABCD-EFGH</code></pre>
+
+    <h2>지원 환경</h2>
+    <ul>
+      <li>macOS: Apple Silicon, Intel</li>
+      <li>Linux: x86-64, ARM64</li>
+      <li>버전 지정: <code>install.sh --version v1.0.0</code></li>
+    </ul>
+
+    <p><a href="https://github.com/jikime/pie-relay">GitHub 저장소와 수동 설치 안내 보기</a></p>
+  </main>
+</body>
+</html>
+

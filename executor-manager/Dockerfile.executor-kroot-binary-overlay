@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.7
+
+# Pie-only release overlay. It combines a freshly built Pie Executor base with
+# the exact Kroot binary from an already validated image. Use the canonical
+# Dockerfile.executor-kroot whenever Kroot itself changes.
+ARG PIE_KROOT_SOURCE_IMAGE=pie-relay-client-kroot:latest
+ARG PIE_EXECUTOR_BASE_IMAGE=pie-relay-client:latest
+FROM ${PIE_KROOT_SOURCE_IMAGE} AS kroot-source
+
+FROM ${PIE_EXECUTOR_BASE_IMAGE}
+ARG PIE_KROOT_SOURCE_IMAGE
+LABEL ai.pielab.kroot-source-image="${PIE_KROOT_SOURCE_IMAGE}"
+USER root
+COPY --from=kroot-source /usr/local/bin/kroot /usr/local/bin/kroot
+RUN chmod 0555 /usr/local/bin/kroot
+USER pie:pie

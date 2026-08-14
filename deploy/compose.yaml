@@ -1,0 +1,221 @@
+name: pie-relay
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pie_relay
+      POSTGRES_USER: pie_relay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [control]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pie_relay -d pie_relay"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  relay:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    image: pie-relay-server:local
+    restart: unless-stopped
+    command: ["-addr=:13412"]
+    environment:
+      RELAY_JWT_SECRET: ${RELAY_JWT_SECRET:?set RELAY_JWT_SECRET}
+      RELAY_NODE_ID: ${RELAY_NODE_ID:-relay-1}
+      RELAY_POOL_ID: ${RELAY_POOL_ID:-pie-relay-default}
+      RELAY_ALLOWED_APPLICATIONS: ${RELAY_ALLOWED_APPLICATIONS:-pie-control,pie-relay-desktop,pie-mobile}
+      RELAY_REQUIRE_POOL_SCOPE: ${RELAY_REQUIRE_POOL_SCOPE:-true}
+      RELAY_ALLOW_DIRECT_TOKENS_WITHOUT_POOL_SCOPE: ${RELAY_ALLOW_DIRECT_TOKENS_WITHOUT_POOL_SCOPE:-true}
+      RELAY_PUBLIC_URL: ${RELAY_PUBLIC_URL:-https://relay.cookai.dev}
+      RELAY_MOBILE_STATE_FILE: /var/lib/pie-relay/relay/mobile-state.json
+      HOST_ENROLL_SECRET: ${HOST_ENROLL_SECRET:?set HOST_ENROLL_SECRET}
+      PIE_CONTROL_PLANE_URL: http://manager:19090
+      PIE_CONTROL_PLANE_TOKEN: ${PIE_RELAY_PRESENCE_TOKEN:?set PIE_RELAY_PRESENCE_TOKEN}
+      PIE_RELAY_CONTROL_URL: http://relay:13412
+      PIE_RELAY_CONTROL_TOKEN: ${PIE_RELAY_CONTROL_TOKEN:?set PIE_RELAY_CONTROL_TOKEN}
+      PIE_RELAY_METRICS_TOKEN: ${PIE_RELAY_METRICS_TOKEN:?set PIE_RELAY_METRICS_TOKEN}
+      RELAY_ALLOWED_ORIGINS: ${RELAY_ALLOWED_ORIGINS:-tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://cookai.dev,https://*.cookai.dev}
+      RELAY_ALLOW_LEGACY_QUERY_TICKET: ${RELAY_ALLOW_LEGACY_QUERY_TICKET:-false}
+      RELAY_ALLOW_LEGACY_UNSCOPED_TOKENS: ${RELAY_ALLOW_LEGACY_UNSCOPED_TOKENS:-false}
+      RELAY_MAX_PARTICIPANTS_PER_ROOM: ${RELAY_MAX_PARTICIPANTS_PER_ROOM:-64}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - relay-state:/var/lib/pie-relay/relay
+    networks: [edge, control, executor]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/relay", "-healthcheck=http://127.0.0.1:13412/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  manager:
+    build:
+      context: ..
+      dockerfile: executor-manager/Dockerfile.manager
+    image: pie-executor-manager:local
+    restart: unless-stopped
+    environment:
+      PIE_EXECUTOR_MANAGER_ADDR: :19090
+      PIE_EXECUTOR_MANAGER_TOKEN: ${PIE_MANAGER_ADMIN_TOKEN:?set PIE_MANAGER_ADMIN_TOKEN}
+      PIE_RELAY_PRESENCE_TOKEN: ${PIE_RELAY_PRESENCE_TOKEN:?set PIE_RELAY_PRESENCE_TOKEN}
+      PIE_DEVICE_AUTH_SECRET: ${PIE_DEVICE_AUTH_SECRET:-}
+      PIE_AUTH_INTROSPECTION_URL: ${PIE_AUTH_INTROSPECTION_URL:-}
+      PIE_AUTH_CLIENT_ID: ${PIE_AUTH_CLIENT_ID:-}
+      PIE_AUTH_CLIENT_SECRET: ${PIE_AUTH_CLIENT_SECRET:-}
+      PIE_AUTH_HTTP_TIMEOUT: ${PIE_AUTH_HTTP_TIMEOUT:-5s}
+      PIE_AUTH_CACHE_TTL: ${PIE_AUTH_CACHE_TTL:-30s}
+      PIE_AUTH_NEGATIVE_CACHE_TTL: ${PIE_AUTH_NEGATIVE_CACHE_TTL:-5s}
+      PIE_CORS_ALLOWED_ORIGINS: ${PIE_CORS_ALLOWED_ORIGINS:-tauri://localhost,http://tauri.localhost,https://tauri.localhost,http://localhost:1420,http://127.0.0.1:1420,https://admin-relay.cookai.dev}
+      PIE_USER_WEBHOOK_SECRET: ${PIE_USER_WEBHOOK_SECRET:-}
+      PIE_DEFAULT_MAX_SESSIONS: ${PIE_DEFAULT_MAX_SESSIONS:-8}
+      PIE_DEFAULT_MAX_PARTICIPANTS: ${PIE_DEFAULT_MAX_PARTICIPANTS:-32}
+      PIE_CONTROL_OPERATION_RETENTION: ${PIE_CONTROL_OPERATION_RETENTION:-168h}
+      PIE_CONTROL_RECONCILE_CONCURRENCY: ${PIE_CONTROL_RECONCILE_CONCURRENCY:-8}
+      PIE_CONTROL_DATABASE_URL: postgres://pie_relay:${POSTGRES_PASSWORD}@postgres:5432/pie_relay?sslmode=disable
+      PIE_CONTROL_REGISTRY_DIR: ${PIE_DATA_DIR:-/var/lib/pie-relay}/control
+      PIE_EXECUTOR_REGISTRY_DIR: ${PIE_DATA_DIR:-/var/lib/pie-relay}/registry
+      PIE_EXECUTOR_BLOB_DIR: ${PIE_DATA_DIR:-/var/lib/pie-relay}/blobs
+      PIE_EXECUTOR_WORK_DIR: ${PIE_DATA_DIR:-/var/lib/pie-relay}/workspaces
+      PIE_EXECUTOR_STATE_DIR: ${PIE_DATA_DIR:-/var/lib/pie-relay}/executor-state
+      PIE_CLAUDE_AUTH_DIR: ${PIE_DATA_DIR:-/var/lib/pie-relay}/claude-auth
+      PIE_CLAUDE_AUTH_LOGIN_DIR: ${PIE_DATA_DIR:-/var/lib/pie-relay}/claude-auth/login
+      PIE_CLAUDE_AUTH_REQUIRED: ${PIE_CLAUDE_AUTH_REQUIRED:-true}
+      PIE_CLAUDE_AUTH_ROLLOUT_CONCURRENCY: ${PIE_CLAUDE_AUTH_ROLLOUT_CONCURRENCY:-4}
+      PIE_CLAUDE_SUBSCRIPTION_MAX_CONCURRENT_TURNS: ${PIE_CLAUDE_SUBSCRIPTION_MAX_CONCURRENT_TURNS:-4}
+      PIE_CHAT_JOURNAL_DIR: ${PIE_DATA_DIR:-/var/lib/pie-relay}/chat-journal
+      PIE_CHAT_JOURNAL_MAX_BYTES: ${PIE_CHAT_JOURNAL_MAX_BYTES:-67108864}
+      PIE_CHAT_EVENT_MAX_BYTES: ${PIE_CHAT_EVENT_MAX_BYTES:-8388608}
+      PIE_CHAT_IDLE_SCAN_INTERVAL: ${PIE_CHAT_IDLE_SCAN_INTERVAL:-1m}
+      PIE_CHAT_SESSION_IDLE_TIMEOUT: ${PIE_CHAT_SESSION_IDLE_TIMEOUT:-15m}
+      PIE_EXECUTOR_IDLE_TIMEOUT: ${PIE_EXECUTOR_IDLE_TIMEOUT:-1h}
+      PIE_EXECUTOR_MANAGER_ID: ${PIE_EXECUTOR_MANAGER_ID:-manager-1}
+      PIE_EXECUTOR_IMAGE: ${PIE_EXECUTOR_IMAGE:-pie-relay-client:latest}
+      PIE_EXECUTOR_CONTAINER_USER: ${PIE_EXECUTOR_CONTAINER_USER:-10001:10001}
+      # 사용자별 격리 컨테이너 전용 정책이다. Host OS에는 적용하지 않는다.
+      PIE_EXECUTOR_PERMISSION_MODE: ${PIE_EXECUTOR_PERMISSION_MODE:-bypassPermissions}
+      PIE_EXECUTOR_KROOT_AUTO_LINK: ${PIE_EXECUTOR_KROOT_AUTO_LINK:-false}
+      PIE_EXECUTOR_NETWORK: ${PIE_EXECUTOR_NETWORK:-pie-executor}
+      PIE_EXECUTOR_REQUIRE_ISOLATED_NETWORK: ${PIE_EXECUTOR_REQUIRE_ISOLATED_NETWORK:-true}
+      PIE_EXECUTOR_ALLOW_USER_NAMESPACES: ${PIE_EXECUTOR_ALLOW_USER_NAMESPACES:-false}
+      PIE_EXECUTOR_MEMORY_SWAP: ${PIE_EXECUTOR_MEMORY_SWAP:-2g}
+      PIE_EXECUTOR_DISK_QUOTA_BYTES: ${PIE_EXECUTOR_DISK_QUOTA_BYTES:-21474836480}
+      PIE_EXECUTOR_DISK_HEADROOM_BYTES: ${PIE_EXECUTOR_DISK_HEADROOM_BYTES:-5368709120}
+      PIE_EXECUTOR_DISK_SCAN_INTERVAL: ${PIE_EXECUTOR_DISK_SCAN_INTERVAL:-1m}
+      PIE_RELAY_URL: ws://relay:13412/ws/agent
+      PIE_RELAY_PUBLIC_URL: ${RELAY_PUBLIC_URL:-https://relay.cookai.dev}
+      PIE_RELAY_CONTROL_URL: http://relay:13412
+      PIE_RELAY_CONTROL_TOKEN: ${PIE_RELAY_CONTROL_TOKEN:?set PIE_RELAY_CONTROL_TOKEN}
+      PIE_RELAY_JWT_SECRET: ${RELAY_JWT_SECRET:?set RELAY_JWT_SECRET}
+      PIE_RELAY_ROUTING_SECRET: ${PIE_RELAY_ROUTING_SECRET:-}
+      PIE_RELAY_DEFAULT_APPLICATION_ID: ${PIE_RELAY_DEFAULT_APPLICATION_ID:-pie-control}
+      PIE_RELAY_DEFAULT_POOL_ID: ${RELAY_POOL_ID:-pie-relay-default}
+      PIE_RELAY_HEARTBEAT_TIMEOUT: ${PIE_RELAY_HEARTBEAT_TIMEOUT:-90s}
+      PIE_PREVIEW_DOMAIN: ${PIE_PREVIEW_DOMAIN:-preview.kroot.io}
+      PIE_PREVIEW_PUBLIC_SCHEME: ${PIE_PREVIEW_PUBLIC_SCHEME:-https}
+      PIE_PREVIEW_PUBLIC_PORT: ${PIE_PREVIEW_PUBLIC_PORT:-0}
+      PIE_PREVIEW_GATEWAY_CONTAINER: ${PIE_PREVIEW_GATEWAY_CONTAINER:-pie-preview-gateway}
+      PIE_PREVIEW_GATEWAY_TOKEN: ${PIE_PREVIEW_GATEWAY_TOKEN:?set PIE_PREVIEW_GATEWAY_TOKEN}
+      PIE_PREVIEW_ACCESS_SECRET: ${PIE_PREVIEW_ACCESS_SECRET:?set PIE_PREVIEW_ACCESS_SECRET}
+      PIE_PREVIEW_RECONCILE_INTERVAL: ${PIE_PREVIEW_RECONCILE_INTERVAL:-2s}
+      PIE_PREVIEW_DEFAULT_TTL: ${PIE_PREVIEW_DEFAULT_TTL:-4h}
+      PIE_PREVIEW_MAX_TTL: ${PIE_PREVIEW_MAX_TTL:-24h}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PIE_DATA_DIR:-/var/lib/pie-relay}:${PIE_DATA_DIR:-/var/lib/pie-relay}
+    networks: [control, manager-egress]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      relay:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:19090/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  preview-gateway:
+    build:
+      context: ..
+      dockerfile: executor-manager/Dockerfile.preview-gateway
+    image: pie-preview-gateway:local
+    container_name: ${PIE_PREVIEW_GATEWAY_CONTAINER:-pie-preview-gateway}
+    restart: unless-stopped
+    environment:
+      PIE_PREVIEW_GATEWAY_ADDR: :18080
+      PIE_PREVIEW_MANAGER_URL: http://manager:19090
+      PIE_PREVIEW_DOMAIN: ${PIE_PREVIEW_DOMAIN:-preview.kroot.io}
+      PIE_PREVIEW_GATEWAY_TOKEN: ${PIE_PREVIEW_GATEWAY_TOKEN:?set PIE_PREVIEW_GATEWAY_TOKEN}
+      PIE_PREVIEW_ACCESS_SECRET: ${PIE_PREVIEW_ACCESS_SECRET:?set PIE_PREVIEW_ACCESS_SECRET}
+      PIE_PREVIEW_ROUTE_CACHE_TTL: ${PIE_PREVIEW_ROUTE_CACHE_TTL:-2s}
+      PIE_PREVIEW_SESSION_TTL: ${PIE_PREVIEW_SESSION_TTL:-8h}
+      PIE_PREVIEW_MAX_BODY_BYTES: ${PIE_PREVIEW_MAX_BODY_BYTES:-67108864}
+      PIE_PREVIEW_MAX_CONNECTIONS: ${PIE_PREVIEW_MAX_CONNECTIONS:-512}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [edge, control]
+    depends_on:
+      manager:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:18080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  traefik:
+    image: traefik:v3.1
+    restart: unless-stopped
+    command: ["--configFile=/etc/traefik/traefik.yaml"]
+    ports:
+      - "${PIE_HTTP_BIND_ADDRESS:-0.0.0.0}:${PIE_HTTP_PORT:-80}:80"
+      - "${PIE_HTTPS_BIND_ADDRESS:-0.0.0.0}:${PIE_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${PIE_TRAEFIK_CONFIG:-./traefik/traefik.yaml}:/etc/traefik/traefik.yaml:ro
+      - ${PIE_TRAEFIK_DYNAMIC_CONFIG:-./traefik/dynamic.yaml}:/etc/traefik/dynamic.yaml:ro
+      - traefik-acme:/var/lib/traefik
+    networks: [edge, control]
+    depends_on:
+      relay:
+        condition: service_healthy
+      manager:
+        condition: service_healthy
+      preview-gateway:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  relay-state:
+  traefik-acme:
+
+networks:
+  edge:
+  control:
+    internal: true
+  executor:
+    # Manager가 만든 Executor 컨테이너가 Compose 수명주기와 독립적으로 이
+    # 네트워크에 남는다. Compose 소유로 두면 Relay 재생성 시 활성 endpoint가
+    # 있는 네트워크를 제거하려고 하므로 로컬 부트스트랩에서 미리 만든 외부
+    # 네트워크를 사용한다.
+    name: ${PIE_EXECUTOR_NETWORK:-pie-executor}
+    external: true
+  manager-egress:

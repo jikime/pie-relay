@@ -1,0 +1,105 @@
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${PIE_LOCAL_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - ${PIE_DATA_DIR:?set PIE_DATA_DIR}/postgres:/var/lib/postgresql/data
+
+  mock-membership:
+    build:
+      context: ./local/mock-membership
+      dockerfile: Dockerfile
+    image: pie-local-membership:local
+    restart: unless-stopped
+    environment:
+      MOCK_AUTH_CLIENT_ID: ${PIE_AUTH_CLIENT_ID:?set PIE_AUTH_CLIENT_ID}
+      MOCK_AUTH_CLIENT_SECRET: ${PIE_AUTH_CLIENT_SECRET:?set PIE_AUTH_CLIENT_SECRET}
+      MOCK_AUTH_CONTROL_TOKEN: ${PIE_LOCAL_AUTH_CONTROL_TOKEN:?set PIE_LOCAL_AUTH_CONTROL_TOKEN}
+      MOCK_AUTH_SLOW_DELAY: ${PIE_LOCAL_AUTH_SLOW_DELAY:-3s}
+    ports:
+      - "127.0.0.1:${PIE_LOCAL_AUTH_PORT:-18080}:18080"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Docker Desktop does not publish host ports from an `internal` network.
+    # Manager already has this egress network for external membership calls.
+    networks: [manager-egress]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/mock-membership", "-healthcheck=http://127.0.0.1:18080/healthz"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  relay:
+    ports:
+      - "${PIE_LOCAL_RELAY_BIND_ADDRESS:-0.0.0.0}:${PIE_LOCAL_RELAY_PORT:-13412}:13412"
+    volumes:
+      - ${PIE_DATA_DIR:?set PIE_DATA_DIR}/relay:/var/lib/pie-relay/relay
+    environment:
+      # Pie Canvas Builder와 Pie Client가 기본으로 요청하는 ACP pool과
+      # 로컬 Relay의 등록 pool을 같게 유지한다. 값이 다르면 컨테이너가
+      # healthy여도 Manager는 "no healthy relay node"로 세션을 거절한다.
+      RELAY_POOL_ID: ${RELAY_POOL_ID:-pie-canvas}
+      RELAY_PUBLIC_URL: ${PIE_LOCAL_RELAY_PUBLIC_URL:?set PIE_LOCAL_RELAY_PUBLIC_URL}
+      RELAY_ALLOWED_ORIGINS: ${PIE_LOCAL_RELAY_ALLOWED_ORIGINS:?set PIE_LOCAL_RELAY_ALLOWED_ORIGINS}
+      # 공용 Relay의 기본 목록은 데스크톱·모바일만 포함한다. 로컬 통합
+      # 환경에서는 Pie Canvas의 scoped ACP session도 같은 검증 경로를
+      # 사용하므로 application scope를 명시적으로 허용한다.
+      RELAY_ALLOWED_APPLICATIONS: ${RELAY_ALLOWED_APPLICATIONS:-pie-control,pie-relay-desktop,pie-mobile,pie-canvas}
+
+  manager:
+    ports:
+      - "${PIE_LOCAL_MANAGER_BIND_ADDRESS:-127.0.0.1}:${PIE_LOCAL_MANAGER_PORT:-19090}:19090"
+    environment:
+      PIE_RELAY_DEFAULT_POOL_ID: ${RELAY_POOL_ID:-pie-canvas}
+      PIE_AUTH_INTROSPECTION_URL: http://mock-membership:18080/oauth/introspect
+      PIE_AUTH_HTTP_TIMEOUT: ${PIE_AUTH_HTTP_TIMEOUT:-750ms}
+      PIE_AUTH_CACHE_TTL: ${PIE_AUTH_CACHE_TTL:-1s}
+      PIE_AUTH_NEGATIVE_CACHE_TTL: ${PIE_AUTH_NEGATIVE_CACHE_TTL:-500ms}
+      PIE_CONTROL_RECONCILE_INTERVAL: ${PIE_CONTROL_RECONCILE_INTERVAL:-2s}
+      PIE_CONTROL_MAINTENANCE_INTERVAL: ${PIE_CONTROL_MAINTENANCE_INTERVAL:-1m}
+      PIE_RELAY_PUBLIC_URL: ${PIE_LOCAL_RELAY_PUBLIC_URL:?set PIE_LOCAL_RELAY_PUBLIC_URL}
+      PIE_CORS_ALLOWED_ORIGINS: ${PIE_LOCAL_CORS_ALLOWED_ORIGINS:?set PIE_LOCAL_CORS_ALLOWED_ORIGINS}
+    depends_on:
+      mock-membership:
+        condition: service_healthy
+
+  traefik:
+    volumes:
+      - ./local/traefik.yaml:/etc/traefik/traefik.yaml:ro
+      - ./local/dynamic.yaml:/etc/traefik/dynamic.yaml:ro
+      - ${PIE_LOCAL_CERT_DIR:-./local/.generated/certs}:/etc/traefik/certs:ro
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [observability]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:${PIE_LOCAL_PROMETHEUS_PORT:-19092}:9090"
+    volumes:
+      - ${PIE_LOCAL_PROMETHEUS_CONFIG:-./local/.generated/prometheus/prometheus.yml}:/etc/prometheus/prometheus.yml:ro
+      - ./local/alerts.yaml:/etc/prometheus/alerts.yaml:ro
+      - ${PIE_LOCAL_PROMETHEUS_SECRETS_DIR:-./local/.generated/prometheus/secrets}:/run/local-secrets:ro
+      - ${PIE_DATA_DIR:?set PIE_DATA_DIR}/prometheus:/prometheus
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # `control` reaches Relay/Manager; the non-internal network makes the
+    # loopback-only Prometheus UI port publishable on Docker Desktop.
+    networks: [control, manager-egress]
+    depends_on:
+      relay:
+        condition: service_healthy
+      manager:
+        condition: service_healthy

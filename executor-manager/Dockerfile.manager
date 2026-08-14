@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1.7
+
+FROM golang:1.25.12-alpine AS build
+WORKDIR /src
+COPY executor-manager/go.mod executor-manager/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY executor-manager/ ./
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pie-executor-manager ./cmd/manager
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates docker-cli tzdata \
+    && addgroup -S pie \
+    && adduser -S -G pie -h /var/lib/pie-relay pie \
+    && mkdir -p /var/lib/pie-relay \
+    && chown -R pie:pie /var/lib/pie-relay
+COPY --from=build /out/pie-executor-manager /usr/local/bin/pie-executor-manager
+
+# Docker socket access is equivalent to host-root authority. The Compose
+# deployment deliberately runs this management component as root and keeps it
+# off the public edge; Executor containers themselves remain non-root and do
+# not receive the socket.
+USER root
+EXPOSE 19090
+ENTRYPOINT ["/usr/local/bin/pie-executor-manager"]

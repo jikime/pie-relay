@@ -1,0 +1,92 @@
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/server.crt
+        keyFile: /etc/traefik/certs/server.key
+  certificates:
+    - certFile: /etc/traefik/certs/server.crt
+      keyFile: /etc/traefik/certs/server.key
+
+http:
+  routers:
+    relay-enroll-local:
+      rule: Host(`relay.localhost`) && Path(`/host/enroll`)
+      priority: 110
+      entryPoints: [websecure]
+      service: relay
+      middlewares: [secure-headers, enroll-rate]
+      tls: {}
+    relay-join-local:
+      rule: Host(`relay.localhost`) && Path(`/rooms/join`)
+      priority: 110
+      entryPoints: [websecure]
+      service: relay
+      middlewares: [secure-headers, join-rate]
+      tls: {}
+    relay-invites-local:
+      rule: Host(`relay.localhost`) && Path(`/rooms/invites`)
+      priority: 110
+      entryPoints: [websecure]
+      service: relay
+      middlewares: [secure-headers, invite-rate]
+      tls: {}
+    relay-local:
+      rule: Host(`relay.localhost`) || Host(`127.0.0.1`)
+      entryPoints: [websecure]
+      service: relay
+      middlewares: [secure-headers]
+      tls: {}
+    api-local:
+      rule: Host(`api-relay.localhost`)
+      entryPoints: [websecure]
+      service: manager
+      middlewares: [secure-headers]
+      tls: {}
+    admin-local:
+      rule: Host(`admin-relay.localhost`)
+      entryPoints: [websecure]
+      service: manager
+      middlewares: [secure-headers]
+      tls: {}
+    previews-local:
+      rule: HostRegexp(`[a-z0-9-]+\.preview\.localhost`)
+      entryPoints: [websecure]
+      service: preview-gateway
+      tls: {}
+
+  services:
+    relay:
+      loadBalancer:
+        servers:
+          - url: http://relay:13412
+    manager:
+      loadBalancer:
+        servers:
+          - url: http://manager:19090
+    preview-gateway:
+      loadBalancer:
+        servers:
+          - url: http://preview-gateway:18080
+
+  middlewares:
+    enroll-rate:
+      rateLimit:
+        average: 5
+        period: 1s
+        burst: 10
+    join-rate:
+      rateLimit:
+        average: 20
+        period: 1s
+        burst: 40
+    invite-rate:
+      rateLimit:
+        average: 20
+        period: 1s
+        burst: 40
+    secure-headers:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: no-referrer

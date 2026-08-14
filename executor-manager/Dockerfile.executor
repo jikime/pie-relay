@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1.7
+
+FROM golang:1.25.12-alpine AS go-build
+WORKDIR /src/client
+COPY client/go.mod client/go.sum ./
+RUN go mod download
+COPY client/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pie-client ./cmd/client
+
+FROM node:22-bookworm-slim AS node-build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/pie-relay/node-executor
+COPY client/node-executor/package.json client/node-executor/package-lock.json ./
+RUN npm ci --omit=dev \
+    && npm cache clean --force
+
+FROM node:22-bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bubblewrap ca-certificates git openssh-client ripgrep socat tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 pie \
+    && useradd --uid 10001 --gid pie --create-home --home-dir /home/executor --shell /bin/bash pie \
+    && mkdir -p /opt/pie-relay/node-executor /workspace \
+    && chown -R pie:pie /home/executor /workspace
+COPY --from=go-build /out/pie-client /usr/local/bin/pie-client
+COPY --from=node-build /opt/pie-relay/node-executor/node_modules /opt/pie-relay/node-executor/node_modules
+COPY client/node-executor/executor.mjs client/node-executor/workspace.mjs client/node-executor/acp-executor.mjs client/node-executor/codex-acp-adapter.mjs client/node-executor/pty-host.mjs client/node-executor/claude-cli.mjs client/node-executor/preview-launcher.mjs client/node-executor/package.json /opt/pie-relay/node-executor/
+RUN chmod 0755 /opt/pie-relay/node-executor/claude-cli.mjs \
+    /opt/pie-relay/node-executor/acp-executor.mjs \
+    /opt/pie-relay/node-executor/codex-acp-adapter.mjs \
+    /opt/pie-relay/node-executor/preview-launcher.mjs \
+    && ln -s /opt/pie-relay/node-executor/claude-cli.mjs /usr/local/bin/claude \
+    && ln -s /usr/local/bin/pie-client /usr/local/bin/pie-relay-client
+
+ENV HOME=/home/executor \
+    EXECUTOR_PATH=/opt/pie-relay/node-executor/executor.mjs \
+    ACP_EXECUTOR_PATH=/opt/pie-relay/node-executor/acp-executor.mjs \
+    PIE_ACP_AGENT_COMMAND=/opt/pie-relay/node-executor/node_modules/.bin/claude-agent-acp \
+    PTY_HOST_PATH=/opt/pie-relay/node-executor/pty-host.mjs \
+    PIE_PREVIEW_LAUNCHER_PATH=/opt/pie-relay/node-executor/preview-launcher.mjs \
+    CLAUDE_CONFIG_DIR=/home/executor/.claude \
+    PATH=/opt/pie-relay/node-executor/node_modules/.bin:${PATH}
+WORKDIR /workspace
+USER pie:pie
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["pie-client", "sessions", "serve", "--listen", "127.0.0.1:19091"]

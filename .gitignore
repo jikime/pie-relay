@@ -1,0 +1,19 @@
+# Local Pie Relay integration environment (generated secrets, certificates and state).
+deploy/local/.env
+deploy/local/.generated/
+deploy/local/.profiles/
+deploy/test-server/.env
+.local/
+examples/third-party-web-chat/.env
+examples/third-party-web-chat/var/
+node_modules/
+.next/
+.next-e2e/
+.next-e2e-*/
+*.tsbuildinfo
+.DS_Store
+
+# Tool output.
+coverage/
+*.prof
+*.test
