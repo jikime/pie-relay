@@ -13,6 +13,9 @@ node_modules/
 *.tsbuildinfo
 .DS_Store
 
+# Local nested prototype repository; it is not part of the public Pie Relay source tree.
+/prototypes/pty/
+
 # Tool output.
 coverage/
 *.prof
