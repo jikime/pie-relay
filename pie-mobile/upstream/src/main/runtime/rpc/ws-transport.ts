@@ -5,7 +5,7 @@
 // regardless of transport encryption.
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
-import { WebSocketServer, type WebSocket } from 'ws'
+import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import type { RpcTransport } from './transport'
 import { createStaticWebClientHandler } from './static-web-client-handler'
 
@@ -313,7 +313,7 @@ export class WebSocketTransport implements RpcTransport {
     const onPong = (): void => {
       this.wsAlive.add(ws)
     }
-    const onMessage = (data: WebSocket.RawData, isBinary: boolean): void => {
+    const onMessage = (data: RawData, isBinary: boolean): void => {
       // Why: any inbound traffic counts as proof of life, not just pongs.
       // RN's WebSocket runtime auto-pongs server pings transparently, but
       // app-level frames also count toward liveness so an actively-talking

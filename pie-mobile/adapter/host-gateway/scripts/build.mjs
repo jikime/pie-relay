@@ -1,4 +1,5 @@
 import { rmSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { build } from 'esbuild'
 
 rmSync('dist', { recursive: true, force: true })
@@ -10,6 +11,7 @@ await build({
   platform: 'node',
   format: 'esm',
   target: 'node20',
+  nodePaths: [resolve('node_modules')],
   sourcemap: true,
   legalComments: 'linked',
   external: ['node-pty'],
